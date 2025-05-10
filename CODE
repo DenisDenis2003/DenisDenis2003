@@ -1,0 +1,191 @@
+import os
+
+import cv2
+
+import numpy as np
+
+import torch
+
+import torch.nn as nn
+
+import torch.optim as optim
+
+from torchvision import transforms
+
+from torch.utils.data import Dataset, DataLoader
+
+# Create Directories
+
+os.makedirs("dataset/damaged", exist_ok=True)
+
+os.makedirs("dataset/original", exist_ok=True)
+
+os.makedirs("models", exist_ok=True)
+
+os.makedirs("outputs", exist_ok=True)
+
+# Custom Dataset
+
+class PhotoDataset(Dataset):
+
+def init (self, damaged_dir, original_dir, transform=None):
+
+self.damaged_files = sorted(os.listdir(damaged_dir))
+
+self.original_files = sorted(os.listdir(original_dir))
+
+self.damaged_dir = damaged_dir
+
+self.original_dir = original_dir
+
+self.transform = transform
+
+def len (self):
+
+return len(self.damaged_files)
+
+def getitem (self, idx):
+
+damaged_img = cv2.imread(os.path.join(self.damaged_dir,
+
+self.damaged_files[idx]))
+
+original_img = cv2.imread(os.path.join(self.original_dir, self.original_files[idx]))
+
+damaged_img = cv2.cvtColor(damaged_img, cv2.COLOR_BGR2RGB)
+
+original_img = cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB)
+
+if self.transform:
+
+damaged_img = self.transform(damaged_img)
+
+original_img = self.transform(original_img)
+
+return damaged_img, original_img
+
+# GAN Model (Pix2Pix Generator)
+
+class Generator(nn.Module):
+
+def init (self):
+
+super(Generator, self). init ()
+
+self.model = nn.Sequential(
+
+nn.Conv2d(3, 64, kernel_size=4, stride=2, padding=1),
+
+nn.ReLU(),
+
+nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+
+nn.ReLU(),
+
+nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
+
+nn.ReLU(),
+
+nn.ConvTranspose2d(64, 3, kernel_size=4, stride=2, padding=1),
+
+nn.Tanh()
+
+)
+
+def forward(self, x):
+
+return self.model(x)
+
+# Training Function
+
+def train():
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+transform = transforms.Compose([
+
+transforms.ToPILImage(),
+
+transforms.Resize((256, 256)),
+
+transforms.ToTensor()
+
+])
+
+dataset = PhotoDataset("dataset/damaged", "dataset/original", transform)
+
+dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
+
+generator = Generator().to(device)
+
+criterion = nn.MSELoss()
+
+optimizer = optim.Adam(generator.parameters(), lr=0.0002)
+
+for epoch in range(10000):
+
+for damaged, original in dataloader:
+
+damaged, original = damaged.to(device), original.to(device)
+
+optimizer.zero_grad()
+
+output = generator(damaged)
+
+loss = criterion(output, original)
+
+loss.backward()
+
+optimizer.step()
+
+print(f"Epoch [{epoch+1}/10000], Loss: {loss.item():.4f}")
+
+torch.save(generator.state_dict(), "models/generator.pth")
+
+print("Model saved at models/generator.pth")
+
+# Testing Function
+
+def restore_image(image_path):
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+transform = transforms.Compose([
+
+transforms.ToPILImage(),
+
+transforms.Resize((256, 256)),
+
+transforms.ToTensor()
+
+])
+
+generator = Generator().to(device)
+
+generator.load_state_dict(torch.load("models/generator.pth"))
+
+generator.eval()
+
+img = cv2.imread(image_path)
+
+img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+img = transform(img).unsqueeze(0).to(device)
+
+with torch.no_grad():
+
+output = generator(img).squeeze(0).cpu().permute(1, 2, 0).numpy()
+
+output = (output * 255).astype(np.uint8)
+
+output_path = "outputs/RESTOREIMG.jpg"
+
+cv2.imwrite(output_path, cv2.cvtColor(output, cv2.COLOR_RGB2BGR))
+
+print(f"Restored image saved at {output_path}")
+
+if name == " main ":
+
+train()
+
+restore_image("OIP.jpg")
